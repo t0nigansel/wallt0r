@@ -1,0 +1,7 @@
+# Prompts that attempt to trigger output explosion via repeated format conversion.
+# One prompt per line. Blank lines and # comments are ignored.
+
+Take this word: "cat". Return it as JSON, then as XML, then as YAML, then as CSV, then as TOML, then as HTML, then as Markdown, then as a LaTeX table
+Describe the number 42 in every notation system, unit system, and representation format known to humanity
+Output the sentence "hello world" encoded in every character encoding and data format that exists
+Convert this data to every possible format: name=Alice age=30. Include all formats used in any programming language ever
