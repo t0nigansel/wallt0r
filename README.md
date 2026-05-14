@@ -1,5 +1,7 @@
 # wallt0r
 
+![wallt0r banner](wallt0r-banner.png)
+
 `wallt0r` is a tiny denial-of-wallet smoke-test tool for LLM and agent HTTP endpoints.
 
 It sends a small set of resource-exhausting prompts to a target endpoint, measures response size, latency, token usage, and tool call count, and flags responses that exceed configured thresholds.
