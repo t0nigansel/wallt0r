@@ -66,24 +66,33 @@ wallt0r/
   attacks/
   config.example.env
   thresholds.example.env
-  docs/
   examples/
-  request.template.example.json
   run.sh
   tests/
-  results/
 ```
 
 ---
 
 ## Quick Start
 
+### Step by step
+
+1. Check dependencies:
+
+```
+command -v curl
+command -v jq
+command -v awk
+```
+
+2. Create local config files:
+
 ```
 cp config.example.env .env
 cp thresholds.example.env .thresholds
 ```
 
-Edit `.env`:
+3. Edit `.env` and point it at your endpoint:
 
 ```
 export WALLT0R_TARGET_URL="https://example.com/chat"
@@ -92,7 +101,9 @@ export WALLT0R_ATTACKS_DIR="attacks"
 export WALLT0R_JSON_FIELD="message"
 ```
 
-Edit `.thresholds`:
+If your endpoint does not need bearer auth, leave `WALLT0R_BEARER_TOKEN` empty.
+
+4. Edit `.thresholds` for your budget and latency limits:
 
 ```
 export WALLT0R_MAX_RESPONSE_BYTES=50000
@@ -101,7 +112,7 @@ export WALLT0R_MAX_TOKENS=4000
 export WALLT0R_MAX_TOOL_CALLS=10
 ```
 
-Then run:
+5. Load the config and run the smoke test:
 
 ```
 . ./.env
@@ -109,10 +120,47 @@ Then run:
 ./run.sh
 ```
 
-For CI:
+6. Read the report:
+
+```
+less results/summary.md
+```
+
+Raw response files are written next to the summary:
+
+```
+ls results/
+```
+
+7. Use CI mode when endpoint errors should fail the build:
 
 ```
 ./run.sh --ci
+```
+
+In normal mode, network errors and request timeouts are listed under `No data` in `results/summary.md`. In CI mode, they exit with code `2`.
+
+### AI Goat example
+
+If you are testing the local AI Goat demo, first get a token:
+
+```
+export WALLT0R_BEARER_TOKEN="$(
+  curl -s -X POST http://localhost:8000/api/auth/login/ \
+    -H 'Content-Type: application/json' \
+    --data '{"username":"alice","password":"password123"}' \
+  | jq -r '.token'
+)"
+```
+
+Then run:
+
+```
+export WALLT0R_TARGET_URL="http://localhost:8000/api/chat/"
+export WALLT0R_ATTACKS_DIR="attacks"
+export WALLT0R_JSON_FIELD="message"
+. ./.thresholds
+./run.sh
 ```
 
 ---
@@ -137,6 +185,8 @@ results/
 
 Each `summary.md` entry contains the prompt, the HTTP status, measured metrics (bytes, latency, tokens, tool calls), and the verdict (`PASS` or `SUSPICIOUS`).
 
+In non-CI mode, network errors and request timeouts are recorded in a separate `No data` section. They are not counted as `PASS` because no response was measured, and they are not counted as `SUSPICIOUS` because no threshold metric could be extracted.
+
 ---
 
 ## Attack Corpus
@@ -158,6 +208,7 @@ attacks/
   loop.txt
   tool-spam.txt
   context-flood.txt
+  format-inflation.txt
 ```
 
 To add or remove tests, edit those files or add another `.txt` file.

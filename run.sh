@@ -33,7 +33,8 @@ mkdir -p "${WALLT0R_RESULTS_DIR}"
 
 _tmp_body=$(mktemp)
 _tmp_req=$(mktemp)
-trap 'rm -f "${_tmp_body}" "${_tmp_req}"' EXIT
+_tmp_no_data=$(mktemp)
+trap 'rm -f "${_tmp_body}" "${_tmp_req}" "${_tmp_no_data}"' EXIT
 
 _summary="${WALLT0R_RESULTS_DIR}/summary.md"
 {
@@ -44,6 +45,7 @@ _summary="${WALLT0R_RESULTS_DIR}/summary.md"
 
 _suspicious=0
 _total=0
+_no_data=0
 
 _build_body() {
     local _prompt="$1"
@@ -72,6 +74,13 @@ _extract_tool_calls() {
         '[.. | objects | select(.type == "tool_use" or .type == "function")] | length' \
         2>/dev/null) || _result="0"
     printf '%d' "${_result:-0}" 2>/dev/null || printf '0'
+}
+
+_is_2xx() {
+    case "$1" in
+        2??) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 _send_request() {
@@ -125,7 +134,15 @@ for _attack_file in "${WALLT0R_ATTACKS_DIR}"/*.txt; do
             fi
             printf 'warn: network error on %s #%d, skipping\n' "${_category}" "${_prompt_num}" >&2
             _total=$((_total - 1))
+            _no_data=$((_no_data + 1))
+            printf '| %s | %s | network_error_or_timeout |\n' \
+                "${_category}" "${_line}" >> "${_tmp_no_data}"
             continue
+        fi
+
+        if [ "${_ci_mode}" = "1" ] && ! _is_2xx "${_http_status}"; then
+            printf 'error: HTTP %s on %s #%d\n' "${_http_status}" "${_category}" "${_prompt_num}" >&2
+            exit 2
         fi
 
         _verdict="PASS"
@@ -174,12 +191,20 @@ for _attack_file in "${WALLT0R_ATTACKS_DIR}"/*.txt; do
 done
 
 {
+    if [ "${_no_data}" -gt 0 ]; then
+        printf '\n## No data\n\n'
+        printf 'These prompts did not return a usable response. In non-CI mode they are documented here but not counted as PASS or SUSPICIOUS.\n\n'
+        printf '| category | prompt | reason |\n'
+        printf '|---|---|---|\n'
+        cat "${_tmp_no_data}"
+    fi
+
     printf '\n---\n\n'
-    printf 'Total: %d | Suspicious: %d | Pass: %d\n' \
-        "${_total}" "${_suspicious}" "$((_total - _suspicious))"
+    printf 'Total: %d | Suspicious: %d | Pass: %d | No data: %d\n' \
+        "${_total}" "${_suspicious}" "$((_total - _suspicious))" "${_no_data}"
 } >> "${_summary}"
 
-printf '\n%d attacks run, %d suspicious\n' "${_total}" "${_suspicious}"
+printf '\n%d attacks run, %d suspicious, %d no data\n' "${_total}" "${_suspicious}" "${_no_data}"
 
 [ "${_suspicious}" -gt 0 ] && exit 1
 exit 0

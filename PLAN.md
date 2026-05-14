@@ -4,7 +4,13 @@ Roadmap and intentional non-goals for `wallt0r`.
 
 ## Current Status
 
-Pre-v0.1. Repository scaffolding, README, AGENTS.md, PLAN.md in place. No working `run.sh` yet.
+v0.1.0 is implemented and unreleased. The main script, attack corpus, example configuration, result output, changelog, and shell-level tests are in place.
+
+Remaining release work:
+
+- keep documentation aligned with the implemented behavior
+- run smoke tests against real local/demo endpoints
+- tag `v0.1.0` after the first release pass
 
 ## v0.1 — Minimum Viable Tool
 
@@ -12,17 +18,17 @@ Goal: a working shell script that sends attacks, measures metrics, writes a summ
 
 Scope:
 
-- `run.sh` with single-endpoint testing
-- bearer-token auth
-- default JSON body and template-file support
-- four threshold metrics: response bytes, latency seconds, token usage (where available), tool call count (where available)
-- five attack categories: recursion, expansion, format inflation, tool-call spam, context flooding
-- `results/summary.md` with PASS / SUSPICIOUS per attack
-- exit codes 0 / 1 / 2
-- CI mode flag
-- shell-level smoke tests against a mock endpoint
-- MIT license file
-- example template for OpenAI-compatible endpoints
+- [x] `run.sh` with single-endpoint testing
+- [x] bearer-token auth
+- [x] default JSON body and template-file support
+- [x] four threshold metrics: response bytes, latency seconds, token usage (where available), tool call count (where available)
+- [x] six attack categories: recursion, expansion, loop, format inflation, tool-spam, context flooding
+- [x] `results/summary.md` with PASS / SUSPICIOUS per attack
+- [x] exit codes 0 / 1 / 2
+- [x] CI mode flag
+- [x] shell-level smoke tests against a mock endpoint
+- [x] MIT license file
+- [x] example templates for OpenAI-compatible and Anthropic Messages-style endpoints
 
 Out of scope for v0.1:
 

@@ -9,9 +9,10 @@ Initial release.
 - Four threshold metrics: response bytes, latency, token usage, tool call count
 - Six attack categories: recursion, expansion, loop, tool-spam, context-flood, format-inflation
 - `results/summary.md` with PASS / SUSPICIOUS verdict per attack
+- Network errors and timeouts in non-CI mode are documented under `No data` in `summary.md`
 - Per-attack result JSON in `results/`
 - Exit codes: 0 (all pass), 1 (at least one suspicious), 2 (config or runtime error)
-- CI mode (`--ci`): exits 2 on any network error instead of skipping
+- CI mode (`--ci`): exits 2 on any network error or non-2xx HTTP response instead of skipping
 - Token extraction supports OpenAI (`usage.total_tokens`, `usage.prompt_tokens + completion_tokens`) and Anthropic (`usage.input_tokens + output_tokens`) response shapes
 - Tool call extraction supports Anthropic (`type: tool_use`) and OpenAI (`type: function`) response shapes
 - Shell-level tests against a netcat mock (no Python required)
