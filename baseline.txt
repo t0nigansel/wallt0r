@@ -1,0 +1,13 @@
+# Default baseline prompts for wallt0r.
+# These are short, benign queries that should produce fast, small responses.
+# Swap this file via WALLT0R_BASELINE_PROMPTS_FILE to use your own.
+Hi, what can you help me with?
+Tell me a short joke.
+What is 2 plus 2?
+Recommend a popular book.
+Spell the word "elephant".
+What day is it today?
+Give me one fun fact about cats.
+What is the capital of France?
+Translate "good morning" to Spanish.
+Name a color.
