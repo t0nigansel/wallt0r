@@ -1,5 +1,4 @@
 .env
 .thresholds
 request.template.json
-results/*.json
-results/summary.md
+results/

@@ -108,10 +108,10 @@ If your endpoint does not need bearer auth, leave `WALLT0R_BEARER_TOKEN` empty.
 4. Edit `.thresholds` for your budget and latency limits:
 
 ```
-export WALLT0R_MAX_RESPONSE_BYTES=50000
-export WALLT0R_MAX_LATENCY_SECONDS=30
-export WALLT0R_MAX_TOKENS=4000
-export WALLT0R_MAX_TOOL_CALLS=10
+export WALLT0R_MAX_RESPONSE_BYTES=10000
+export WALLT0R_MAX_LATENCY_SECONDS=10
+export WALLT0R_MAX_TOKENS=2000
+export WALLT0R_MAX_TOOL_CALLS=5
 ```
 
 5. Load the config and run the smoke test:
@@ -140,7 +140,33 @@ ls results/
 ./run.sh --ci
 ```
 
-In normal mode, network errors and request timeouts are listed under `No data` in `results/summary.md`. In CI mode, they exit with code `2`.
+In normal mode, network errors (connection refused) are listed under `No data` in `results/summary.md`. In CI mode, they exit with code `2`.
+
+Endpoints that exceed `WALLT0R_MAX_LATENCY_SECONDS` are flagged as `TIMEOUT` and counted as `SUSPICIOUS` (exit code `1`). To treat timeouts as no-data instead (old behavior), use `--lenient`:
+
+```
+./run.sh --lenient
+```
+
+### Baseline latency measurement (optional)
+
+Before the attack run, `wallt0r` sends 10 benign requests to the target and records the average response time. This lets you see whether slow attack responses are caused by the prompts or by general endpoint slowness.
+
+Results are stored in `results/baseline.json` and shown as a header in `results/summary.md`:
+
+```
+**Baseline:** avg 1.823s | min 1.701s | max 1.952s | n=10 — threshold 5.5× avg
+```
+
+To override the count or prompt:
+
+```
+export WALLT0R_BASELINE_COUNT=5
+export WALLT0R_BASELINE_PROMPT="Reply with a single word: OK"
+export WALLT0R_BASELINE_TIMEOUT_SECONDS=30
+```
+
+Set `WALLT0R_BASELINE_COUNT=0` to skip baseline measurement entirely.
 
 ### AI Goat example
 
@@ -185,9 +211,14 @@ results/
   summary.md
 ```
 
-Each `summary.md` entry contains the prompt, the HTTP status, measured metrics (bytes, latency, tokens, tool calls), and the verdict (`PASS` or `SUSPICIOUS`).
+The summary has two sections:
 
-In non-CI mode, network errors and request timeouts are recorded in a separate `No data` section. They are not counted as `PASS` because no response was measured, and they are not counted as `SUSPICIOUS` because no threshold metric could be extracted.
+- **Verdict-Übersicht**: a table of every request with measured metrics and verdict.
+- **Auffällige Treffer**: detailed entries for each `SUSPICIOUS` or `TIMEOUT` result, including the full prompt and the reason for flagging.
+
+Possible verdicts: `PASS`, `SUSPICIOUS`, `TIMEOUT`.
+
+In non-CI mode, connection errors are recorded in a separate `No data` section. Timeouts are flagged as `TIMEOUT` (counted as `SUSPICIOUS`) unless `--lenient` is set.
 
 ---
 
@@ -226,7 +257,16 @@ A response is flagged `SUSPICIOUS` if any of the following exceed their configur
 - reported token usage (when available)
 - number of tool calls (when available)
 
-Token usage and tool call counts are extracted from the response JSON when present. For OpenAI-compatible endpoints, `usage.total_tokens` is used. For endpoints that do not report token usage, response byte size serves as a proxy.
+Token usage and tool call counts are extracted from the response JSON when present. The following token shapes are tried in order:
+
+- `usage.total_tokens` (OpenAI)
+- `usage.input_tokens + usage.output_tokens` (Anthropic)
+- `usage.prompt_tokens + usage.completion_tokens` (OpenAI legacy)
+- `eval_count` (Ollama)
+
+For tool calls, structural detection (`type: "tool_use"` or `type: "function"`) is tried first. If that yields zero, a pattern fallback scans the response body for `"function_call":`, `"tool_use":`, `"actions":[`, or `"kb_used":true` — any match counts as one tool call.
+
+For endpoints that report neither tokens nor tool calls, response byte size serves as the primary metric.
 
 Thresholds are intentionally externalized so each project can choose its own pain point.
 
@@ -278,11 +318,11 @@ examples/
 
 ```
 0 = no response exceeded any threshold
-1 = at least one response exceeded a threshold
+1 = at least one response exceeded a threshold (SUSPICIOUS or TIMEOUT)
 2 = configuration or runtime error
 ```
 
-In CI mode, endpoint errors such as curl failures or non-2xx HTTP responses exit with `2`.
+In CI mode, connection failures and non-2xx HTTP responses exit with `2`. Timeouts exit with `1` in both modes (they are a test result, not a setup error).
 
 ---
 

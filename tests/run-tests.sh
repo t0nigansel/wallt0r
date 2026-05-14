@@ -12,6 +12,7 @@ _fail() { printf '[FAIL] %s\n' "$1"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 command -v nc >/dev/null 2>&1 || { printf 'error: nc (netcat) is required for tests\n' >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { printf 'error: jq is required\n' >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { printf 'error: python3 is required for baseline tests\n' >&2; exit 2; }
 
 _test_dir=$(mktemp -d)
 _mock_pid=""
@@ -21,6 +22,36 @@ _stop_mock() {
         kill "${_mock_pid}" 2>/dev/null || true
         _mock_pid=""
     fi
+}
+
+# Start a persistent HTTP server that responds to every POST request with _body.
+# Uses python3 http.server. Sets _mock_pid.
+_start_persistent_mock() {
+    local _port="$1" _body="$2"
+    local _body_file _srv_file
+    _body_file=$(mktemp)
+    _srv_file=$(mktemp)
+    printf '%s' "${_body}" > "${_body_file}"
+    cat > "${_srv_file}" << 'PYEOF'
+import sys, http.server
+
+class H(http.server.BaseHTTPRequestHandler):
+    body_file = sys.argv[2]
+    def do_POST(self):
+        with open(self.body_file, 'rb') as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a): pass
+
+http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+PYEOF
+    python3 "${_srv_file}" "${_port}" "${_body_file}" &
+    _mock_pid=$!
+    sleep 0.3
 }
 
 trap 'rm -rf "${_test_dir}"; _stop_mock' EXIT
@@ -88,6 +119,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -108,6 +140,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -127,6 +160,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=100
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -145,6 +179,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=3
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" --ci >/dev/null 2>&1
 ) || _rc=$?
 [ "${_rc}" = "2" ] \
@@ -162,6 +197,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=3
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 if [ "${_rc}" = "0" ] && grep -q 'No data: 1' "${_test_dir}/r7/summary.md" \
@@ -183,6 +219,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" --ci >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -222,6 +259,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -249,6 +287,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -268,6 +307,7 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=100
     export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
@@ -287,12 +327,159 @@ _rc=0
     export WALLT0R_MAX_LATENCY_SECONDS=30
     export WALLT0R_MAX_TOKENS=4000
     export WALLT0R_MAX_TOOL_CALLS=1
+    export WALLT0R_BASELINE_COUNT=0
     bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
 ) || _rc=$?
 _stop_mock
 [ "${_rc}" = "1" ] \
     && _pass "tool calls are counted against threshold" \
     || _fail "tool calls are counted against threshold (got ${_rc})"
+
+# ── Test 16: TIMEOUT counts as SUSPICIOUS (non-lenient) ──────────────────────
+# tail -f /dev/null keeps nc stdin open so it never sends a response
+tail -f /dev/null | nc -l "${_port}" >/dev/null 2>&1 &
+_mock_pid=$!
+sleep 0.3
+_rc=0
+(
+    export WALLT0R_TARGET_URL="http://127.0.0.1:${_port}/chat"
+    export WALLT0R_BEARER_TOKEN=""
+    export WALLT0R_ATTACKS_DIR="${_test_dir}/attacks"
+    export WALLT0R_RESULTS_DIR="${_test_dir}/r15"
+    export WALLT0R_MAX_RESPONSE_BYTES=50000
+    export WALLT0R_MAX_LATENCY_SECONDS=1
+    export WALLT0R_REQUEST_TIMEOUT_SECONDS=1
+    export WALLT0R_MAX_TOKENS=4000
+    export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
+    bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
+) || _rc=$?
+_stop_mock
+[ "${_rc}" = "1" ] \
+    && _pass "TIMEOUT counts as SUSPICIOUS (exit 1)" \
+    || _fail "TIMEOUT counts as SUSPICIOUS (exit 1) (got ${_rc})"
+
+# ── Test 17: --lenient treats TIMEOUT as no-data ─────────────────────────────
+tail -f /dev/null | nc -l "${_port}" >/dev/null 2>&1 &
+_mock_pid=$!
+sleep 0.3
+_rc=0
+(
+    export WALLT0R_TARGET_URL="http://127.0.0.1:${_port}/chat"
+    export WALLT0R_BEARER_TOKEN=""
+    export WALLT0R_ATTACKS_DIR="${_test_dir}/attacks"
+    export WALLT0R_RESULTS_DIR="${_test_dir}/r16"
+    export WALLT0R_MAX_RESPONSE_BYTES=50000
+    export WALLT0R_MAX_LATENCY_SECONDS=1
+    export WALLT0R_REQUEST_TIMEOUT_SECONDS=1
+    export WALLT0R_MAX_TOKENS=4000
+    export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
+    bash "${ROOT_DIR}/run.sh" --lenient >/dev/null 2>&1
+) || _rc=$?
+_stop_mock
+if [ "${_rc}" = "0" ] && grep -q 'No data: 1' "${_test_dir}/r16/summary.md" \
+    && grep -q 'timeout' "${_test_dir}/r16/summary.md"; then
+    _pass "--lenient treats TIMEOUT as no-data"
+else
+    _fail "--lenient treats TIMEOUT as no-data (got ${_rc})"
+fi
+
+# ── Test 18: Ollama eval_count token shape is counted ────────────────────────
+_start_mock "${_port}" '{"response":"ok","eval_count":3000}'
+_rc=0
+(
+    export WALLT0R_TARGET_URL="http://127.0.0.1:${_port}/chat"
+    export WALLT0R_BEARER_TOKEN=""
+    export WALLT0R_ATTACKS_DIR="${_test_dir}/attacks"
+    export WALLT0R_RESULTS_DIR="${_test_dir}/r17"
+    export WALLT0R_MAX_RESPONSE_BYTES=50000
+    export WALLT0R_MAX_LATENCY_SECONDS=30
+    export WALLT0R_MAX_TOKENS=100
+    export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
+    bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
+) || _rc=$?
+_stop_mock
+[ "${_rc}" = "1" ] \
+    && _pass "Ollama eval_count token shape is counted against threshold" \
+    || _fail "Ollama eval_count token shape is counted against threshold (got ${_rc})"
+
+# ── Test 19: pattern-based tool call detection (kb_used:true) ────────────────
+_start_mock "${_port}" '{"reply":"ok","kb_used":true}'
+_rc=0
+(
+    export WALLT0R_TARGET_URL="http://127.0.0.1:${_port}/chat"
+    export WALLT0R_BEARER_TOKEN=""
+    export WALLT0R_ATTACKS_DIR="${_test_dir}/attacks"
+    export WALLT0R_RESULTS_DIR="${_test_dir}/r18"
+    export WALLT0R_MAX_RESPONSE_BYTES=50000
+    export WALLT0R_MAX_LATENCY_SECONDS=30
+    export WALLT0R_MAX_TOKENS=4000
+    export WALLT0R_MAX_TOOL_CALLS=0
+    export WALLT0R_BASELINE_COUNT=0
+    bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
+) || _rc=$?
+_stop_mock
+[ "${_rc}" = "1" ] \
+    && _pass "pattern-based tool call detection (kb_used:true)" \
+    || _fail "pattern-based tool call detection (kb_used:true) (got ${_rc})"
+
+# ── Test 20: WALLT0R_BASELINE_COUNT=0 skips baseline (no baseline.json) ──────
+_start_mock "${_port}" '{"reply":"ok","usage":{"total_tokens":10}}'
+_rc=0
+(
+    export WALLT0R_TARGET_URL="http://127.0.0.1:${_port}/chat"
+    export WALLT0R_BEARER_TOKEN=""
+    export WALLT0R_ATTACKS_DIR="${_test_dir}/attacks"
+    export WALLT0R_RESULTS_DIR="${_test_dir}/r19"
+    export WALLT0R_MAX_RESPONSE_BYTES=50000
+    export WALLT0R_MAX_LATENCY_SECONDS=30
+    export WALLT0R_MAX_TOKENS=4000
+    export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=0
+    bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
+) || _rc=$?
+_stop_mock
+if [ "${_rc}" = "0" ] && [ ! -f "${_test_dir}/r19/baseline.json" ]; then
+    _pass "WALLT0R_BASELINE_COUNT=0 skips baseline"
+else
+    _fail "WALLT0R_BASELINE_COUNT=0 skips baseline (rc=${_rc}, file=$(ls ${_test_dir}/r19/baseline.json 2>/dev/null || echo missing))"
+fi
+
+# ── Test 21: baseline.json is created with correct structure ──────────────────
+_start_persistent_mock "${_port}" '{"reply":"ok","usage":{"total_tokens":10}}'
+_rc=0
+(
+    export WALLT0R_TARGET_URL="http://127.0.0.1:${_port}/chat"
+    export WALLT0R_BEARER_TOKEN=""
+    export WALLT0R_ATTACKS_DIR="${_test_dir}/attacks"
+    export WALLT0R_RESULTS_DIR="${_test_dir}/r20"
+    export WALLT0R_MAX_RESPONSE_BYTES=50000
+    export WALLT0R_MAX_LATENCY_SECONDS=30
+    export WALLT0R_MAX_TOKENS=4000
+    export WALLT0R_MAX_TOOL_CALLS=10
+    export WALLT0R_BASELINE_COUNT=3
+    bash "${ROOT_DIR}/run.sh" >/dev/null 2>&1
+) || _rc=$?
+_stop_mock
+_bl_json="${_test_dir}/r20/baseline.json"
+if [ -f "${_bl_json}" ] \
+    && jq -e '.avg_latency_s and .min_latency_s and .max_latency_s and .successful and .latencies_s' \
+        "${_bl_json}" >/dev/null 2>&1 \
+    && [ "$(jq '.successful' "${_bl_json}")" = "3" ] \
+    && [ "$(jq '.latencies_s | length' "${_bl_json}")" = "3" ]; then
+    _pass "baseline.json created with correct structure (n=3)"
+else
+    _fail "baseline.json created with correct structure (rc=${_rc}, file=$(cat "${_bl_json}" 2>/dev/null || echo missing))"
+fi
+
+# ── Test 22: baseline section appears in summary.md ──────────────────────────
+if grep -q 'Baseline:' "${_test_dir}/r20/summary.md" 2>/dev/null; then
+    _pass "baseline section appears in summary.md"
+else
+    _fail "baseline section appears in summary.md"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
